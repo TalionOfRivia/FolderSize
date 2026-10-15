@@ -26,7 +26,10 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_title("FolderSize")
             .with_inner_size([1400.0, 850.0])
-            .with_min_inner_size([800.0, 500.0]),
+            .with_min_inner_size([800.0, 500.0])
+            .with_icon(
+                eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png")).unwrap_or_default(),
+            ),
         ..Default::default()
     };
     eframe::run_native(

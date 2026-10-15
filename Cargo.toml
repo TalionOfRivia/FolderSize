@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "foldersize"
 version = "0.1.0"
 description = "Free, fast disk space analyzer for Windows: see which folders take up your drive."
@@ -18,4 +18,7 @@ lto = true
 codegen-units = 1
 strip = true
 panic = "abort"
+
+[build-dependencies]
+winresource = "0.1.34"
 
