@@ -47,6 +47,8 @@ cargo build --release
 
 The exe is at `target\release\foldersize.exe`.
 
+To build an exe for sharing, use `powershell -File tools\build-release.ps1`. It does the same build but removes your local folder paths (which include your Windows user name) from inside the exe.
+
 ## License
 
 MIT
