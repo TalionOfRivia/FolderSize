@@ -8,7 +8,14 @@ No install, no account, no trial. One `.exe`.
 
 - **Fast parallel scan.** All CPU cores walk the tree at once. A 1.7 TB drive with 1.6 million files scans in about 30 seconds the first time, and in a few seconds once Windows has the folders cached.
 - **Folder tree** sorted biggest first, with size, a % of parent bar, file and folder counts, and last-modified date.
-- **Treemap** of the selected folder: every box is a folder or file, sized by how much space it takes. Click a box to find it in the tree. Double-click a folder to zoom in, and use **Up** to zoom out.
+- **Charts** of the selected folder. Switch between:
+  - **Bars**: the biggest items ranked, with sizes and percentages
+  - **Pie**: each item's share of the folder
+  - **Towers**: the biggest items as columns
+  - **Sunburst**: rings showing what's inside each folder, three levels deep
+  - **Treemap**: every box is a folder or file, sized by the space it takes
+
+  Click anything in a chart to find it in the tree. Double-click a folder to zoom in, and use **Up** to zoom out. Drag the divider to give the chart more room.
 - **Largest files** tab: the 500 biggest files on the scanned drive or folder.
 - **Cleanup**: right-click anything to *Show in Explorer*, *Copy path* or *Send to Recycle Bin*. It asks you first, and it never deletes anything permanently.
 - **Export CSV** of every folder with its size, for spreadsheets.

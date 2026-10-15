@@ -1,10 +1,11 @@
 #![windows_subsystem = "windows"]
 
 mod scan;
+mod charts;
 mod sys;
 mod treemap;
 
-use eframe::egui::{self, Align2, Color32, FontId, Rect, RichText, Sense, Stroke, Vec2};
+use eframe::egui::{self, Align2, Color32, FontId, Rect, RichText, Sense, Vec2};
 use egui_extras::{Column, TableBuilder};
 use scan::{Kind, NONE, Progress, Tree};
 use std::collections::HashSet;
@@ -57,6 +58,8 @@ struct App {
     expanded: HashSet<u32>,
     selected: Option<u32>,
     map_root: u32,
+    chart: charts::Chart,
+    map_frac: f32,
     rows: Vec<(u32, u16)>,
     rows_dirty: bool,
     scroll_to: Option<usize>,
@@ -78,6 +81,8 @@ impl App {
             expanded: HashSet::new(),
             selected: None,
             map_root: 0,
+            chart: charts::Chart::Bars,
+            map_frac: 0.42,
             rows: Vec::new(),
             rows_dirty: true,
             scroll_to: None,
@@ -270,22 +275,39 @@ impl eframe::App for App {
                 });
             });
         } else {
-            egui::Panel::right("map")
-                .resizable(true)
-                .default_size(ctx.content_rect().width() * 0.42)
-                .min_size(250.0)
-                .show(ui, |ui| self.map_panel(ui));
             egui::CentralPanel::default().show(ui, |ui| {
-                self.summary(ui);
-                ui.horizontal(|ui| {
-                    ui.selectable_value(&mut self.tab, Tab::Folders, "Folder tree");
-                    ui.selectable_value(&mut self.tab, Tab::Largest, "Largest files");
-                });
-                ui.separator();
-                match self.tab {
-                    Tab::Folders => self.tree_table(ui),
-                    Tab::Largest => self.largest_table(ui),
+                // Tree on the left, chart on the right, split by a draggable divider that
+                // keeps its proportion when the window is resized or maximized.
+                let full = ui.available_rect_before_wrap();
+                let split_x = full.left() + full.width() * (1.0 - self.map_frac);
+                let left = Rect::from_min_max(full.min, egui::pos2(split_x - 5.0, full.bottom()));
+                let right = Rect::from_min_max(egui::pos2(split_x + 5.0, full.top()), full.max);
+                let handle = Rect::from_min_max(egui::pos2(split_x - 4.0, full.top()), egui::pos2(split_x + 4.0, full.bottom()));
+                let h = ui.interact(handle, ui.id().with("split"), Sense::drag());
+                if h.dragged() {
+                    if let Some(p) = h.interact_pointer_pos() {
+                        self.map_frac = ((full.right() - p.x) / full.width()).clamp(0.2, 0.75);
+                    }
                 }
+                if h.hovered() || h.dragged() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                }
+                let line = if h.hovered() || h.dragged() { Color32::from_gray(140) } else { Color32::from_gray(60) };
+                ui.painter().vline(split_x, full.y_range(), egui::Stroke::new(1.0, line));
+
+                ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| {
+                    self.summary(ui);
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(&mut self.tab, Tab::Folders, "Folder tree");
+                        ui.selectable_value(&mut self.tab, Tab::Largest, "Largest files");
+                    });
+                    ui.separator();
+                    match self.tab {
+                        Tab::Folders => self.tree_table(ui),
+                        Tab::Largest => self.largest_table(ui),
+                    }
+                });
+                ui.scope_builder(egui::UiBuilder::new().max_rect(right), |ui| self.map_panel(ui));
             });
         }
 
@@ -414,8 +436,9 @@ impl App {
         let expanded = &self.expanded;
 
         let mut table = TableBuilder::new(ui)
+            .auto_shrink([false, false])
             .striped(true)
-            .resizable(true)
+            .resizable(false)
             .sense(Sense::click())
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
             .column(Column::remainder().at_least(250.0).clip(true))
@@ -528,8 +551,9 @@ impl App {
         let selected = self.selected;
         let list = &self.largest;
         TableBuilder::new(ui)
+            .auto_shrink([false, false])
             .striped(true)
-            .resizable(true)
+            .resizable(false)
             .sense(Sense::click())
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
             .column(Column::exact(85.0))
@@ -584,55 +608,29 @@ impl App {
             let p = tree.path_of(root);
             ui.add(egui::Label::new(RichText::new(p.display().to_string()).strong()).truncate());
         });
+        ui.horizontal_wrapped(|ui| {
+            for c in charts::Chart::ALL {
+                ui.selectable_value(&mut self.chart, c, c.label()).on_hover_text(c.hint());
+            }
+        });
         ui.label(
-            RichText::new("Click to select · double-click a folder to zoom in · right-click for actions")
-                .weak()
-                .small(),
+            RichText::new(format!(
+                "{} · click to select · double-click a folder to zoom in · right-click for actions",
+                self.chart.hint()
+            ))
+            .weak()
+            .small(),
         );
-        let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click());
-        let painter = ui.painter_at(rect);
-        let mut hits: Vec<(Rect, u32)> = Vec::new();
-        draw_map(&painter, tree, root, rect, 0, None, &mut hits);
-
-        let hovered = resp
-            .hover_pos()
-            .and_then(|p| hits.iter().rev().find(|(r, _)| r.contains(p)).map(|h| h.1));
-        if let Some(sel) = self.selected {
-            if let Some((r, _)) = hits.iter().rev().find(|h| h.1 == sel) {
-                painter.rect_stroke(*r, 0.0, Stroke::new(2.5, Color32::WHITE), egui::StrokeKind::Inside);
-            }
+        ui.add_space(4.0);
+        let ev = charts::show(ui, self.chart, tree, root, self.selected);
+        if let Some(id) = ev.select {
+            self.reveal(id);
         }
-        if let Some(h) = hovered {
-            if let Some((r, _)) = hits.iter().rev().find(|x| x.1 == h) {
-                painter.rect_stroke(*r, 0.0, Stroke::new(1.5, Color32::from_white_alpha(180)), egui::StrokeKind::Inside);
-            }
-            let n = &tree.nodes[h as usize];
-            let total = tree.nodes[root as usize].size.max(1);
-            resp.clone().on_hover_ui_at_pointer(|ui| {
-                ui.strong(n.name.to_string());
-                ui.label(format!("{}  ({:.1}% of this view)", fmt_size(n.size), n.size as f64 * 100.0 / total as f64));
-                if n.kind == Kind::Dir {
-                    ui.label(format!("{} files, {} folders", fmt_count(n.files), fmt_count(n.dirs)));
-                }
-            });
+        if let Some(id) = ev.zoom {
+            self.map_root = id;
         }
-        let mut ask_delete = None;
-        if let Some(h) = hovered {
-            resp.context_menu(|ui| context_items(ui, tree, h, &mut ask_delete));
-        }
-        let zoom_in = hovered.filter(|&h| tree.nodes[h as usize].kind == Kind::Dir);
-        if resp.clicked() {
-            if let Some(h) = hovered {
-                self.reveal(h);
-            }
-        }
-        if resp.double_clicked() {
-            if let Some(h) = zoom_in {
-                self.map_root = h;
-            }
-        }
-        if ask_delete.is_some() {
-            self.confirm_delete = ask_delete;
+        if ev.delete.is_some() {
+            self.confirm_delete = ev.delete;
         }
     }
 
@@ -738,60 +736,6 @@ fn percent_bar(ui: &mut egui::Ui, frac: f32) {
         FontId::proportional(11.0),
         Color32::WHITE,
     );
-}
-
-// ---------- treemap drawing ----------
-
-const MAX_ITEMS: usize = 400;
-const HEADER: f32 = 15.0;
-
-fn draw_map(
-    painter: &egui::Painter,
-    tree: &Tree,
-    id: u32,
-    rect: Rect,
-    depth: u32,
-    hue: Option<f32>,
-    hits: &mut Vec<(Rect, u32)>,
-) {
-    let node = &tree.nodes[id as usize];
-    let kids: Vec<u32> = node
-        .children
-        .iter()
-        .copied()
-        .filter(|&c| tree.nodes[c as usize].size > 0)
-        .take(MAX_ITEMS)
-        .collect();
-    let sizes: Vec<f64> = kids.iter().map(|&c| tree.nodes[c as usize].size as f64).collect();
-    let rects = treemap::squarify(&sizes, rect);
-    for (i, (&c, r)) in kids.iter().zip(rects).enumerate() {
-        if r.width() < 1.5 || r.height() < 1.5 {
-            continue;
-        }
-        let n = &tree.nodes[c as usize];
-        let h = hue.unwrap_or_else(|| (i as f32 * 0.618_034).fract());
-        let light = 0.62 - depth.min(4) as f32 * 0.08;
-        let color: Color32 = if n.kind == Kind::File {
-            egui::ecolor::Hsva::new(h, 0.35, light - 0.12, 1.0).into()
-        } else {
-            egui::ecolor::Hsva::new(h, 0.55, light, 1.0).into()
-        };
-        painter.rect_filled(r, 0.0, color);
-        painter.rect_stroke(r, 0.0, Stroke::new(0.5, Color32::from_black_alpha(160)), egui::StrokeKind::Inside);
-        hits.push((r, c));
-
-        let can_nest = n.kind == Kind::Dir && !n.children.is_empty() && depth < 6 && r.width() > 40.0 && r.height() > 40.0;
-        if r.width() > 50.0 && r.height() > 14.0 {
-            let label = format!("{}  {}", n.name, fmt_size(n.size));
-            let galley = painter.layout_no_wrap(label, FontId::proportional(11.0), Color32::from_black_alpha(230));
-            let clip = Rect::from_min_size(r.min + Vec2::new(3.0, 1.0), Vec2::new(r.width() - 6.0, HEADER - 2.0));
-            painter.with_clip_rect(clip.intersect(painter.clip_rect())).galley(clip.min, galley, Color32::BLACK);
-        }
-        if can_nest {
-            let inner = Rect::from_min_max(r.min + Vec2::new(2.0, HEADER), r.max - Vec2::new(2.0, 2.0));
-            draw_map(painter, tree, c, inner, depth + 1, Some(h), hits);
-        }
-    }
 }
 
 // ---------- formatting ----------
